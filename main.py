@@ -1,44 +1,57 @@
-from fastapi import FastAPI, Request
-from pydantic import BaseModel
-import faiss
-import numpy as np
-from sentence_transformers import SentenceTransformer
-from utils import load_index, load_metadata
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
+import json
+import numpy as np
+import faiss
+from sentence_transformers import SentenceTransformer
 
 app = FastAPI()
 
-# 👇 Add this CORS middleware configuration
+# Enable CORS for the Chrome extension
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # You can replace "*" with the specific extension origin for stricter security
+    allow_origins=["*"],  # or ["chrome-extension://your-extension-id"]
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-model = SentenceTransformer("all-MiniLM-L6-v2")
-
-# Load stored embeddings + FAISS index + metadata
-index = load_index("index_store.faiss")
-metadata = load_metadata("jira_issues.json")  # Each item contains issueId, title, description
-
-class BugQuery(BaseModel):
+# Pydantic model for incoming request
+class BugReport(BaseModel):
     summary: str
     description: str
 
+# Load SentenceTransformer model
+model = SentenceTransformer("all-MiniLM-L6-v2")
+
+# Load Jira issues and FAISS index
+with open("jira_issues.json", "r") as f:
+    jira_issues = json.load(f)
+
+documents = [f"{issue['summary']} {issue['description']}" for issue in jira_issues]
+embeddings = np.load("embeddings.npy")
+index = faiss.read_index("index_store.faiss")
+
 @app.post("/search")
-async def search_similar_bug(query: BugQuery):
-    full_query = f"{query.summary} {query.description}"
-    query_vector = model.encode([full_query])
-    D, I = index.search(np.array(query_vector).astype("float32"), k=3)
+def search_bug(report: BugReport):
+    query = f"{report.summary} {report.description}"
+    query_vector = model.encode([query]).astype("float32")
+
+    # Top 5 results
+    distances, indices = index.search(query_vector, k=5)
 
     results = []
-    for i in I[0]:
-        if i < len(metadata):
-            results.append(metadata[i])
+    for dist, idx in zip(distances[0], indices[0]):
+        # Only return if distance is within similarity threshold
+        if idx < len(jira_issues) and dist < 1.0:
+            results.append({
+                "issue": jira_issues[idx],
+                "distance": float(dist)
+            })
 
     return {"matches": results}
+
 
 # pip install -r requirements.txt
 # python ingest.py
