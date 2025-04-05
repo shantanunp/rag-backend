@@ -1,0 +1,4 @@
+.idea
+__pycache__
+embeddings.npy
+index_store.faiss

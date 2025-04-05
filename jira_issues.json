@@ -1,0 +1,17 @@
+[
+  {
+    "id": "JIRA-1001",
+    "summary": "App crashes on login",
+    "description": "When the user logs in, the app crashes"
+  },
+  {
+    "id": "JIRA-1002",
+    "summary": "Slow page load",
+    "description": "Home page takes too long to load"
+  },
+  {
+    "id": "JIRA-1003",
+    "summary": "Incorrect calculation",
+    "description": "Total amount is calculated wrong in cart"
+  }
+]
