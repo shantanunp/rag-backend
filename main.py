@@ -28,3 +28,10 @@ async def search_similar_bug(query: BugQuery):
             results.append(metadata[i])
 
     return {"matches": results}
+
+# pip install -r requirements.txt
+# python ingest.py
+# uvicorn main:app --reload
+# curl -X POST http://localhost:8000/search \
+#                               -H "Content-Type: application/json" \
+#                                  -d '{"summary": "app login crash", "description": "app crashes when logging in"}'
