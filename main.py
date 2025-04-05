@@ -4,8 +4,19 @@ import faiss
 import numpy as np
 from sentence_transformers import SentenceTransformer
 from utils import load_index, load_metadata
+from fastapi.middleware.cors import CORSMiddleware
 
 app = FastAPI()
+
+# 👇 Add this CORS middleware configuration
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # You can replace "*" with the specific extension origin for stricter security
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 model = SentenceTransformer("all-MiniLM-L6-v2")
 
 # Load stored embeddings + FAISS index + metadata
