@@ -16,7 +16,7 @@ jira_issues = [
     },
     {
         "id": "JIRA-102",
-        "summary": "Password reset link not working",
+        "summary": "Password reset should be redirected",
         "description": """
             Given I forgot my password
             When I click on reset link in email
@@ -34,7 +34,7 @@ jira_issues = [
     },
     {
         "id": "JIRA-104",
-        "summary": "User profile update success message missing",
+        "summary": "User profile update success message",
         "description": """
             Given I have updated my profile details
             When I save changes
@@ -43,7 +43,7 @@ jira_issues = [
     },
     {
         "id": "JIRA-105",
-        "summary": "Cart does not update after adding item",
+        "summary": "Update cart after adding item",
         "description": """
             Given I add a product to cart
             When I check the cart
@@ -52,7 +52,7 @@ jira_issues = [
     },
     {
         "id": "JIRA-106",
-        "summary": "Checkout page breaks for guest users",
+        "summary": "Checkout should work for guest users",
         "description": """
             Given I am not logged in
             When I go to checkout
@@ -61,7 +61,7 @@ jira_issues = [
     },
     {
         "id": "JIRA-107",
-        "summary": "Mobile view layout breaks",
+        "summary": "Mobile view should be responsive",
         "description": """
             Given I open site on mobile browser
             When I navigate to any page
@@ -70,7 +70,7 @@ jira_issues = [
     },
     {
         "id": "JIRA-108",
-        "summary": "Notification not shown for new message",
+        "summary": "Notification banner for new message",
         "description": """
             Given I receive a new message
             When I am on dashboard
@@ -79,7 +79,7 @@ jira_issues = [
     },
     {
         "id": "JIRA-109",
-        "summary": "Dark mode theme not applied",
+        "summary": "Apply Dark mode theme",
         "description": """
             Given I toggle dark mode
             When I reload the page
@@ -88,7 +88,7 @@ jira_issues = [
     },
     {
         "id": "JIRA-110",
-        "summary": "Search result links broken",
+        "summary": "Search result details should be correct",
         "description": """
             Given I perform a search
             When I click on result links
