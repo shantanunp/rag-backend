@@ -39,15 +39,14 @@ def search_bug(report: BugReport):
     query_vector = model.encode([query]).astype("float32")
 
     # Top 5 results
-    distances, indices = index.search(query_vector, k=5)
+    similarity, indices = index.search(query_vector, k=5)
 
     results = []
-    for dist, idx in zip(distances[0], indices[0]):
-        # Only return if distance is within similarity threshold
-        if idx < len(jira_issues) and dist < 1.0:
+    for score, idx in zip(similarity[0], indices[0]):
+        if idx < len(jira_issues) and score < 1.0:
             results.append({
                 "issue": jira_issues[idx],
-                "distance": float(dist)
+                "similarity": f"{round(float(score) * 100, 2)}%"
             })
 
     return {"matches": results}
