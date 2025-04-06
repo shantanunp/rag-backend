@@ -3,3 +3,4 @@ __pycache__
 embeddings.npy
 index_store.faiss
 jira_issues.json
+issue_embeddings.json

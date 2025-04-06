@@ -1,14 +1,12 @@
+
 ingest.py
-
-from openai import OpenAI
 import os
-import numpy as np
-import faiss
 import json
-import os
+import numpy as np
+import hashlib
+from openai import OpenAI
+import faiss
 
-# Set your OpenAI API key directly or use environment variables
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY") or "your-api-key-here")
 
 # Simulated Jira data (replace with real data from API later)
 jira_issues = [
@@ -104,28 +102,57 @@ jira_issues = [
     },
 ]
 
-documents = [f"{issue['summary']} {issue['description']}" for issue in jira_issues]
+client = OpenAI(api_key=os.getenv("OPENAI_API_KEY") or "your-api-key-here")
 
-def get_embedding(text: str):
-    response = client.embeddings.create(model="text-embedding-3-small",
-    input=text)
+def hash_issue(issue):
+    combined = issue["summary"] + issue["description"]
+    return hashlib.sha256(combined.encode("utf-8")).hexdigest()
+
+def get_embedding(text):
+    response = client.embeddings.create(model="text-embedding-3-small", input=text)
     return response.data[0].embedding
 
-# Generate embeddings
-embeddings = [get_embedding(doc) for doc in documents]
-embeddings_np = np.array(embeddings).astype("float32")
+# Load previous embeddings
+if os.path.exists("issue_embeddings.json"):
+    with open("issue_embeddings.json", "r") as f:
+        cached_embeddings = json.load(f)
+else:
+    cached_embeddings = {}
 
-# Save embeddings and FAISS index
+new_embeddings = []
+jira_ids = []
+for issue in jira_issues:
+    doc_text = f"{issue['summary']} {issue['description']}"
+    issue_hash = hash_issue(issue)
+
+    if issue["id"] in cached_embeddings and cached_embeddings[issue["id"]]["hash"] == issue_hash:
+        embedding = cached_embeddings[issue["id"]]["embedding"]
+    else:
+        embedding = get_embedding(doc_text)
+        cached_embeddings[issue["id"]] = {
+            "embedding": embedding,
+            "hash": issue_hash
+        }
+
+    new_embeddings.append(embedding)
+    jira_ids.append(issue["id"])
+
+# Save updated embeddings
+with open("issue_embeddings.json", "w") as f:
+    json.dump(cached_embeddings, f, indent=2)
+
+# Save FAISS index
+embeddings_np = np.array(new_embeddings).astype("float32")
 np.save("embeddings.npy", embeddings_np)
-
 dimension = embeddings_np.shape[1]
 index = faiss.IndexFlatL2(dimension)
 index.add(embeddings_np)
 faiss.write_index(index, "index_store.faiss")
 
-# Save metadata
+# Save metadata for matching index positions
 with open("jira_issues.json", "w") as f:
     json.dump(jira_issues, f, indent=2)
+
 
 ------------------------------------------------------------------------------------------------------------------------
 main.py
@@ -164,7 +191,7 @@ index = faiss.read_index("index_store.faiss")
 
 def get_embedding(text: str):
     response = client.embeddings.create(model="text-embedding-3-small",
-    input=text)
+                                        input=text)
     return response.data[0].embedding
 
 @app.post("/search")
@@ -183,3 +210,4 @@ def search_bug(report: BugReport):
             })
 
     return {"matches": results}
+
