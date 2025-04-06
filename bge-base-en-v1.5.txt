@@ -1,7 +1,11 @@
+ingest.py 
 import numpy as np
 import faiss
 import json
 from sentence_transformers import SentenceTransformer
+
+# Load BGE model
+model = SentenceTransformer("BAAI/bge-base-en-v1.5")
 
 # Simulated Jira data (replace with real data from API later)
 jira_issues = [
@@ -96,19 +100,60 @@ jira_issues = [
         """
     },
 ]
-model = SentenceTransformer("all-MiniLM-L6-v2")
-documents = [f"{issue['summary']} {issue['description']}" for issue in jira_issues]
-embeddings = model.encode(documents)
+documents = [issue['description'] for issue in jira_issues]
+embeddings = model.encode(documents, normalize_embeddings=True)  # L2 normalized for cosine
 
-# Save embeddings
 np.save("embeddings.npy", embeddings)
-
-# Create and save FAISS index
 dimension = embeddings.shape[1]
-index = faiss.IndexFlatL2(dimension)
-index.add(np.array(embeddings).astype("float32"))
+index = faiss.IndexFlatIP(dimension)  # Inner product = cosine for normalized
+index.add(embeddings.astype("float32"))
 faiss.write_index(index, "index_store.faiss")
 
-# Save metadata
 with open("jira_issues.json", "w") as f:
     json.dump(jira_issues, f, indent=2)
+
+=============================================================================================
+
+main.py
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
+import json
+import numpy as np
+import faiss
+from sentence_transformers import SentenceTransformer
+
+app = FastAPI()
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+class BugReport(BaseModel):
+    summary: str
+    description: str
+
+model = SentenceTransformer("BAAI/bge-base-en-v1.5")
+with open("jira_issues.json", "r") as f:
+    jira_issues = json.load(f)
+
+embeddings = np.load("embeddings.npy")
+index = faiss.read_index("index_store.faiss")
+
+@app.post("/search")
+def search_bug(report: BugReport):
+    query_vector = model.encode([report.description], normalize_embeddings=True).astype("float32")
+    scores, indices = index.search(query_vector, k=5)
+
+    results = []
+    for score, idx in zip(scores[0], indices[0]):
+        if idx < len(jira_issues) and score > 0.5:
+            results.append({
+                "issue": jira_issues[idx],
+                "similarity": float(score)
+            })
+
+    return {"matches": results}
