@@ -5,7 +5,6 @@ from sentence_transformers import SentenceTransformer
 
 # Simulated Jira data (replace with real data from API later)
 jira_issues = [
-     [
     {
         "id": "JIRA-101",
         "summary": "Login failure on invalid credentials",
