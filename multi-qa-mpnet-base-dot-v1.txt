@@ -1,0 +1,203 @@
+/* BugByte Chrome Extension - Hello World */
+
+// File structure:
+// BugByte/
+// ├── manifest.json
+// ├── popup.html
+// └── popup.js
+
+/* ======================= manifest.json ======================= */
+{
+  "manifest_version": 3,
+  "name": "BugByte - Smart Bug Reporter",
+  "version": "1.0",
+  "description": "AI-powered Chrome extension to report and check bugs via Jira/Confluence.",
+  "action": {
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icon16.png",
+      "48": "icon48.png",
+      "128": "icon128.png"
+    }
+  },
+  "permissions": ["tabs"]
+}
+
+/* ======================= popup.html ======================= */
+<!DOCTYPE html>
+<html>
+<head>
+  <title>BugByte - Report a Bug</title>
+  <style>
+    body {
+      font-family: sans-serif;
+      padding: 10px;
+      width: 300px;
+    }
+    input, textarea {
+      width: 100%;
+      margin-top: 5px;
+      padding: 5px;
+      box-sizing: border-box;
+    }
+    button {
+      margin-top: 10px;
+      padding: 8px;
+      width: 100%;
+    }
+    #responseBox {
+      margin-top: 10px;
+      padding: 5px;
+      background: #f4f4f4;
+      border-radius: 4px;
+      font-size: 0.9em;
+    }
+  </style>
+</head>
+<body>
+  <h3>BugByte</h3>
+  <label>Summary:</label>
+  <input type="text" id="summary" placeholder="Enter bug summary" />
+
+  <label>Description:</label>
+  <textarea id="description" rows="4" placeholder="Describe the issue"></textarea>
+
+  <button id="reportBug">Check & Report Bug</button>
+
+  <div id="responseBox"></div>
+
+  <script src="popup.js"></script>
+</body>
+</html>
+
+/* ======================= popup.js ======================= */
+document.getElementById("reportBug").addEventListener("click", async () => {
+  const summary = document.getElementById("summary").value.trim();
+  const description = document.getElementById("description").value.trim();
+  const responseBox = document.getElementById("responseBox");
+
+  if (!summary || !description) {
+    alert("Please fill in both summary and description.");
+    return;
+  }
+
+  responseBox.innerHTML = "Checking for similar bugs...";
+
+  try {
+    const response = await fetch("http://localhost:8000/search", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ summary, description })
+    });
+
+    if (!response.ok) throw new Error("Server error");
+
+    const data = await response.json();
+    if (data.matches.length === 0) {
+      responseBox.innerHTML = "✅ No similar issues found.";
+    } else {
+      responseBox.innerHTML = `<strong>🔍 Similar Issues:</strong><br>` +
+        data.matches.map(match => {
+          const issue = match.issue;
+          return `<div><strong>${issue.id}</strong>: ${issue.summary}<br>${issue.description}<br><em>Similarity: ${(1 - match.distance).toFixed(2)}</em></div><hr>`;
+        }).join("");
+    }
+  } catch (err) {
+    console.error(err);
+    responseBox.innerHTML = "⚠️ Failed to check similar bugs.";
+  }
+});
+
+/* ======================= ingest.py ======================= */
+import numpy as np
+import faiss
+import json
+from sentence_transformers import SentenceTransformer
+
+# Simulated Jira data (replace with real data from API later)
+jira_issues = [
+    {
+        "id": "JIRA-101",
+        "summary": "Login failure on invalid credentials",
+        "description": """
+            Given I am on the login page
+            When I enter invalid username and password
+            Then I should see an error message
+        """
+    },
+    {
+        "id": "JIRA-102",
+        "summary": "Crash on password reset",
+        "description": """
+            Given I click on Forgot Password
+            When I submit the form without email
+            Then the app should not crash
+        """
+    }
+]
+
+model = SentenceTransformer("multi-qa-mpnet-base-dot-v1")
+documents = [f"{issue['summary']} {issue['description']}" for issue in jira_issues]
+embeddings = model.encode(documents, normalize_embeddings=True)
+
+# Save embeddings
+np.save("embeddings.npy", embeddings)
+
+# Create and save FAISS index
+dimension = embeddings.shape[1]
+index = faiss.IndexFlatIP(dimension)  # Inner Product for cosine similarity
+index.add(np.array(embeddings).astype("float32"))
+faiss.write_index(index, "index_store.faiss")
+
+# Save metadata
+with open("jira_issues.json", "w") as f:
+    json.dump(jira_issues, f, indent=2)
+
+/* ======================= main.py ======================= */
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
+import json
+import numpy as np
+import faiss
+from sentence_transformers import SentenceTransformer
+
+app = FastAPI()
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+class BugReport(BaseModel):
+    summary: str
+    description: str
+
+model = SentenceTransformer("multi-qa-mpnet-base-dot-v1")
+
+with open("jira_issues.json", "r") as f:
+    jira_issues = json.load(f)
+
+documents = [f"{issue['summary']} {issue['description']}" for issue in jira_issues]
+embeddings = np.load("embeddings.npy")
+index = faiss.read_index("index_store.faiss")
+
+@app.post("/search")
+def search_bug(report: BugReport):
+    query = f"{report.summary} {report.description}"
+    query_vector = model.encode([query], normalize_embeddings=True).astype("float32")
+
+    distances, indices = index.search(query_vector, k=5)
+
+    results = []
+    for dist, idx in zip(distances[0], indices[0]):
+        if idx < len(jira_issues) and dist > 0.5:
+            results.append({
+                "issue": jira_issues[idx],
+                "distance": float(1 - dist)
+            })
+
+    return {"matches": results}

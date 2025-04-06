@@ -8,24 +8,20 @@ from sentence_transformers import SentenceTransformer
 
 app = FastAPI()
 
-# Enable CORS for the Chrome extension
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # or ["chrome-extension://your-extension-id"]
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Pydantic model for incoming request
 class BugReport(BaseModel):
     summary: str
     description: str
 
-# Load SentenceTransformer model
-model = SentenceTransformer("all-MiniLM-L6-v2")
+model = SentenceTransformer("multi-qa-mpnet-base-dot-v1")
 
-# Load Jira issues and FAISS index
 with open("jira_issues.json", "r") as f:
     jira_issues = json.load(f)
 
@@ -36,26 +32,16 @@ index = faiss.read_index("index_store.faiss")
 @app.post("/search")
 def search_bug(report: BugReport):
     query = f"{report.summary} {report.description}"
-    query_vector = model.encode([query]).astype("float32")
+    query_vector = model.encode([query], normalize_embeddings=True).astype("float32")
 
-    # Top 5 results
     distances, indices = index.search(query_vector, k=5)
 
     results = []
     for dist, idx in zip(distances[0], indices[0]):
-        # Only return if distance is within similarity threshold
-        if idx < len(jira_issues) and dist < 1.0:
+        if idx < len(jira_issues) and dist > 0.5:
             results.append({
                 "issue": jira_issues[idx],
-                "distance": float(dist)
+                "distance": float(1 - dist)
             })
 
     return {"matches": results}
-
-
-# pip install -r requirements.txt
-# python ingest.py
-# uvicorn main:app --reload
-# curl -X POST http://localhost:8000/search \
-#                               -H "Content-Type: application/json" \
-#                                  -d '{"summary": "app login crash", "description": "app crashes when logging in"}'
