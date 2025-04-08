@@ -8,35 +8,60 @@ from sentence_transformers import SentenceTransformer
 
 app = FastAPI()
 
-# Enable CORS for the Chrome extension
+# Enable CORS for frontend extension access
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # or ["chrome-extension://your-extension-id"]
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Pydantic model for incoming request
 class BugReport(BaseModel):
     summary: str
     description: str
 
-# Load SentenceTransformer model
 model = SentenceTransformer("all-MiniLM-L6-v2")
 
-# Load Jira issues and FAISS index
 with open("jira_issues.json", "r") as f:
     jira_issues = json.load(f)
 
-documents = [f"{issue['summary']} {issue['description']}" for issue in jira_issues]
 embeddings = np.load("embeddings.npy")
 index = faiss.read_index("index_store.faiss")
+
+# --- Chunking function for query ---
+def chunk_text(text, max_tokens=200):
+    sentences = text.split(". ")
+    chunks = []
+    current_chunk = []
+    token_count = 0
+
+    for sentence in sentences:
+        token_estimate = len(sentence.split())
+        if token_count + token_estimate > max_tokens:
+            chunks.append(" ".join(current_chunk))
+            current_chunk = []
+            token_count = 0
+        current_chunk.append(sentence)
+        token_count += token_estimate
+
+    if current_chunk:
+        chunks.append(" ".join(current_chunk))
+    return chunks
+
+# --- Query embedding with pooling ---
+def get_pooled_embedding(text: str):
+    chunks = chunk_text(text)
+    chunk_embeddings = model.encode(chunks)
+    return np.mean(chunk_embeddings, axis=0).astype("float32")
 
 @app.post("/search")
 def search_bug(report: BugReport):
     query = f"{report.summary} {report.description}"
-    query_vector = model.encode([query]).astype("float32")
+    query_vector = get_pooled_embedding(query).reshape(1, -1)
+
+    print("Query vector shape:", query_vector.shape)
+    print("FAISS index dimension:", index.d)
 
     # Top 5 results
     similarity, indices = index.search(query_vector, k=5)
@@ -50,6 +75,10 @@ def search_bug(report: BugReport):
             })
 
     return {"matches": results}
+
+@app.get("/")
+def health():
+    return {"status": "ok"}
 
 
 # pip install -r requirements.txt

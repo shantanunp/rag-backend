@@ -1,6 +1,8 @@
 import numpy as np
 import faiss
 import json
+import hashlib
+import os
 from sentence_transformers import SentenceTransformer
 
 # Simulated Jira data (replace with real data from API later)
@@ -88,27 +90,107 @@ jira_issues = [
     },
     {
         "id": "JIRA-110",
-        "summary": "Search result details should be correct",
+        "summary": "ATM Cash Withdrawal OTP Expiry Issue",
         "description": """
-            Given I perform a search
-            When I click on result links
-            Then they should open correct detail pages
+            "Users are experiencing issues with the OTP-based cash withdrawal feature.
+             The OTP is supposed to be valid for 15 minutes, but multiple reports indicate that the OTP is expiring 
+             within 2–3 minutes.
+             This leads to poor user experience as customers are often forced to regenerate a new OTP while standing at 
+             the ATM. In addition, the regenerated OTP is sometimes invalid due to backend caching issues.
+             Logs from ATM servers show inconsistencies in time synchronization between the mobile app servers and 
+             ATM endpoints, causing token validation mismatches.
+             This has been observed in multiple cities including Mumbai, Delhi, and Bangalore.
+             A deeper investigation revealed that the Redis cache TTL was incorrectly configured to 120 seconds in 
+             some regions. Furthermore, if the user tries more than 3 times, the system blocks the account for 24 hours 
+             as part of fraud detection — even when the error is on our side. We need to introduce more granular logging,
+             ensure consistent configuration across regions, and possibly extend OTP validity to 20 minutes. 
+             Also consider enabling real-time monitoring of Redis TTL values and syncing server clocks using NTP on a
+             tighter interval. Customer complaints have been piling up in the app store reviews, and 
+             this could impact user trust if not addressed urgently.
+             Suggested next steps include a temporary rollback to the previous OTP mechanism until a fix is verified, 
+             and setting up a war room with backend, mobile, SRE, and QA teams for root cause analysis and resolution.
         """
     },
 ]
+
 model = SentenceTransformer("all-MiniLM-L6-v2")
-documents = [f"{issue['summary']} {issue['description']}" for issue in jira_issues]
-embeddings = model.encode(documents)
 
-# Save embeddings
-np.save("embeddings.npy", embeddings)
+# --- Chunking ---
+def chunk_text(text, max_tokens=200):
+    sentences = text.split(". ")
+    chunks = []
+    current_chunk = []
+    token_count = 0
 
-# Create and save FAISS index
-dimension = embeddings.shape[1]
+    for sentence in sentences:
+        token_estimate = len(sentence.split())
+        if token_count + token_estimate > max_tokens:
+            chunks.append(" ".join(current_chunk))
+            current_chunk = []
+            token_count = 0
+        current_chunk.append(sentence)
+        token_count += token_estimate
+
+    if current_chunk:
+        chunks.append(" ".join(current_chunk))
+    return chunks
+
+# --- Mean pooled embedding for all chunks ---
+def get_pooled_embedding(text: str):
+    chunks = chunk_text(text)
+    chunk_embeddings = model.encode(chunks)
+    return np.mean(chunk_embeddings, axis=0)
+
+# --- Caching based on content hash ---
+def hash_issue(issue):
+    combined = issue["summary"] + issue["description"]
+    return hashlib.sha256(combined.encode("utf-8")).hexdigest()
+
+# --- Load cache ---
+cache_path = "issue_embeddings.json"
+cached_embeddings = {}
+if os.path.exists(cache_path):
+    with open(cache_path, "r") as f:
+        cached_embeddings = json.load(f)
+
+# --- Generate embeddings ---
+new_embeddings = []
+updated_cache = {}
+
+for issue in jira_issues:
+    issue_id = issue["id"]
+    doc_text = f"{issue['summary']} {issue['description']}"
+    issue_hash = hash_issue(issue)
+
+    if issue_id in cached_embeddings and cached_embeddings[issue_id]["hash"] == issue_hash:
+        embedding = cached_embeddings[issue_id]["embedding"]
+        print(f"Using cached embedding for {issue_id}")
+    else:
+        print(f"Generating embedding for {issue_id}")
+        embedding = get_pooled_embedding(doc_text).tolist()
+
+    updated_cache[issue_id] = {
+        "embedding": embedding,
+        "hash": issue_hash
+    }
+    new_embeddings.append(embedding)
+
+# --- Save updated cache ---
+with open(cache_path, "w") as f:
+    json.dump(updated_cache, f, indent=2)
+
+# --- Save embedding matrix ---
+embedding_matrix = np.array(new_embeddings).astype("float32")
+np.save("embeddings.npy", embedding_matrix)
+
+# --- FAISS Index ---
+dimension = embedding_matrix.shape[1]  # Should be 384
 index = faiss.IndexFlatL2(dimension)
-index.add(np.array(embeddings).astype("float32"))
+index.add(embedding_matrix)
 faiss.write_index(index, "index_store.faiss")
 
-# Save metadata
+# --- Save metadata ---
 with open("jira_issues.json", "w") as f:
     json.dump(jira_issues, f, indent=2)
+
+print("✅ Index and embeddings saved successfully.")
